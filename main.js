@@ -1,3 +1,5 @@
+// @ts-check
+
 import fetch from 'node-fetch'
 import * as cheerio from 'cheerio'
 
@@ -20,6 +22,4 @@ try {
   }
 } catch (e) {
   console.error(e)
-} finally {
-  process.exit()
 }
