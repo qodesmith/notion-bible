@@ -2,6 +2,7 @@
 
 import fetch from 'node-fetch'
 import * as cheerio from 'cheerio'
+import {writeFileSync} from 'fs'
 
 // The hashtag at the end of the url loads the correct tab on the page.
 const bibleGatewayUrl = new URL(
@@ -23,8 +24,15 @@ try {
     throw new Error(`${totalBooksFound} books found, expected 66`)
   }
 
-  const genesisUrls = getBookUrls($, $otBookSections.first())
-  console.log(genesisUrls)
+  const otUrls = [...$otBookSections].map(section => {
+    return getBookUrls($, $(section))
+  })
+  const ntUrls = [...$ntBookSections].map(section => {
+    return getBookUrls($, $(section))
+  })
+  const bibleUrlJsonData = JSON.stringify({ot: otUrls, nt: ntUrls}, null, 2)
+
+  writeFileSync('data.json', bibleUrlJsonData, 'utf8')
 } catch (e) {
   console.error(e)
 }
@@ -74,5 +82,5 @@ function getBookUrls($, $sectionEl) {
   const bookName = getBookName($, $sectionEl)
   const chapterUrls = getChapterUrls($, $sectionEl)
 
-  return {[bookName]: chapterUrls}
+  return {bookName, chapterUrls}
 }
