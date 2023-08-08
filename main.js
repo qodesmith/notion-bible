@@ -2,49 +2,64 @@
 
 import fetch from 'node-fetch'
 import * as cheerio from 'cheerio'
-import {writeJsonSync} from 'fs-extra/esm'
+import {outputJsonSync} from 'fs-extra/esm'
+
+const originUrl = 'https://www.biblegateway.com'
 
 // The hashtag at the end of the url loads the correct tab on the page.
-const bibleGatewayUrl = new URL(
+const esvUrl =
   'https://www.biblegateway.com/versions/English-Standard-Version-ESV-Bible#booklist'
-)
-const originUrl = bibleGatewayUrl.origin
+const lebUrl =
+  'https://www.biblegateway.com/versions/Lexham-English-Bible-LEB/#booklist'
+const nasb202Url =
+  'https://www.biblegateway.com/versions/New-American-Standard-Bible-NASB/#booklist'
+const amplifiedUrl =
+  'https://www.biblegateway.com/versions/Amplified-Bible-AMP/#booklist'
 
 /**
  * Elements with this attribute contain the abbreviated book name which is also
  * used in other elements to denote verses.
  */
 const osisDataAttr = 'data-osis'
-const dataLocationChapters = './data/chapterUrlData.json'
-const dataLocationVerses = './data/verses.json'
 
-try {
-  // Fetch the Bible book list page.
-  const booksPageResponse = await fetch(bibleGatewayUrl)
-  const booksPageHtml = await booksPageResponse.text()
-  const $ = cheerio.load(booksPageHtml)
+downloadBible(esvUrl, 'esv')
+downloadBible(lebUrl, 'leb')
+downloadBible(nasb202Url, 'nasb')
+downloadBible(amplifiedUrl, 'amp')
 
-  // Get all the old & new testament sections.
-  const $otBookSections = $('.ot-book')
-  const $ntBookSections = $('.nt-book')
-  const totalBooksFound = $otBookSections.length + $ntBookSections.length
-  if (totalBooksFound !== 66) {
-    throw new Error(`${totalBooksFound} books found, expected 66`)
+/**
+ * @param {string} bibleVersionUrl
+ * @param {string} bibleVersion
+ */
+async function downloadBible(bibleVersionUrl, bibleVersion) {
+  try {
+    // Fetch the Bible book list page.
+    const booksPageResponse = await fetch(bibleVersionUrl)
+    const booksPageHtml = await booksPageResponse.text()
+    const $ = cheerio.load(booksPageHtml)
+
+    // Get all the old & new testament sections.
+    const $otBookSections = $('.ot-book')
+    const $ntBookSections = $('.nt-book')
+    const totalBooksFound = $otBookSections.length + $ntBookSections.length
+    if (totalBooksFound !== 66) {
+      throw new Error(`${totalBooksFound} books found, expected 66`)
+    }
+
+    // Save url data for all chapters.
+    const otUrlData = getTestamentUrlData($, $otBookSections)
+    const ntUrlData = getTestamentUrlData($, $ntBookSections)
+    writeUrlData({ot: otUrlData, nt: ntUrlData}, bibleVersion)
+
+    // Get verses.
+    const otVerses = await getTestamentVerses(otUrlData)
+    console.log('Finished aggregating Old Testament data')
+    const ntVerses = await getTestamentVerses(ntUrlData)
+    console.log('Finished aggregating New Testament data')
+    writeVersesData({ot: otVerses, nt: ntVerses}, bibleVersion)
+  } catch (e) {
+    console.error(e)
   }
-
-  // Save url data for all chapters.
-  const otUrlData = getTestamentUrlData($, $otBookSections)
-  const ntUrlData = getTestamentUrlData($, $ntBookSections)
-  writeUrlData({ot: otUrlData, nt: ntUrlData})
-
-  // Get verses.
-  const otVerses = await getTestamentVerses(otUrlData)
-  console.log('Finished aggregating Old Testament data')
-  const ntVerses = await getTestamentVerses(ntUrlData)
-  console.log('Finished aggregating New Testament data')
-  writeVersesData({ot: otVerses, nt: ntVerses})
-} catch (e) {
-  console.error(e)
 }
 
 /**
@@ -59,9 +74,11 @@ function getTestamentUrlData($, $sections) {
 
 /**
  * @param {Record<'ot' | 'nt', {bookName: string; chapterUrls: string[]}[]>} data
+ * @param {string} bibleVersion
  */
-function writeUrlData(data) {
-  writeJsonSync(dataLocationChapters, data, {spaces: 2})
+function writeUrlData(data, bibleVersion) {
+  const destination = `./data/${bibleVersion}/chapterUrlData.json`
+  outputJsonSync(destination, data, {spaces: 2})
 }
 
 /**
@@ -94,11 +111,7 @@ function getChapterUrls($, $sectionEl) {
     throw new Error('Mismatch of expected chapters')
   }
 
-  return $links
-    .map((i, el) => {
-      return new URL($(el).attr('href') ?? '', originUrl).toString()
-    })
-    .toArray()
+  return $links.map((i, el) => `${originUrl}/${$(el).attr('href')}`).toArray()
 }
 
 /**
@@ -182,10 +195,11 @@ async function getTestamentVerses(testamentUrlData) {
 
 /**
  * @param {Record<any, any>} data
+ * @param {string} bibleVersion
  */
-function writeVersesData(data) {
-  console.log('Writing verses data')
-  writeJsonSync(dataLocationVerses, data, {spaces: 2})
+function writeVersesData(data, bibleVersion) {
+  const destination = `./data/${bibleVersion}/versesData.json`
+  outputJsonSync(destination, data, {spaces: 2})
 }
 
 /**
