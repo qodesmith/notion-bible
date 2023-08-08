@@ -22,10 +22,10 @@ const amplifiedUrl =
  */
 const osisDataAttr = 'data-osis'
 
-downloadBible(esvUrl, 'esv')
-downloadBible(lebUrl, 'leb')
-downloadBible(nasb202Url, 'nasb')
-downloadBible(amplifiedUrl, 'amp')
+await downloadBible(esvUrl, 'esv')
+await downloadBible(lebUrl, 'leb')
+await downloadBible(nasb202Url, 'nasb')
+await downloadBible(amplifiedUrl, 'amp')
 
 /**
  * @param {string} bibleVersionUrl
@@ -49,14 +49,20 @@ async function downloadBible(bibleVersionUrl, bibleVersion) {
     // Save url data for all chapters.
     const otUrlData = getTestamentUrlData($, $otBookSections)
     const ntUrlData = getTestamentUrlData($, $ntBookSections)
-    writeUrlData({ot: otUrlData, nt: ntUrlData}, bibleVersion)
+    writeUrlData(
+      {version: bibleVersion, ot: otUrlData, nt: ntUrlData},
+      bibleVersion
+    )
 
     // Get verses.
     const otVerses = await getTestamentVerses(otUrlData)
     console.log('Finished aggregating Old Testament data')
     const ntVerses = await getTestamentVerses(ntUrlData)
     console.log('Finished aggregating New Testament data')
-    writeVersesData({ot: otVerses, nt: ntVerses}, bibleVersion)
+    writeVersesData(
+      {version: bibleVersion, ot: otVerses, nt: ntVerses},
+      bibleVersion
+    )
   } catch (e) {
     console.error(e)
   }
@@ -73,7 +79,7 @@ function getTestamentUrlData($, $sections) {
 }
 
 /**
- * @param {Record<'ot' | 'nt', {bookName: string; chapterUrls: string[]}[]>} data
+ * @param {Record<'ot' | 'nt', {bookName: string; chapterUrls: string[]}[]> & Record<'version', string>} data
  * @param {string} bibleVersion
  */
 function writeUrlData(data, bibleVersion) {
