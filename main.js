@@ -139,9 +139,11 @@ async function getChapterVerses(url, chapter) {
     const verseNum = i + 1
     const $verseEls = $(`p .${bookAbbreviation}-${chapter}-${verseNum}`)
     const verseText = (() => {
-      if ($verseEls.length === 1) return $verseEls.text()
+      if ($verseEls.length === 1) return checkSmallCapsAndGetText($, $verseEls)
 
-      return [...$verseEls].map(verseEl => $(verseEl).text().trim()).join(' ')
+      return [...$verseEls]
+        .map(verseEl => checkSmallCapsAndGetText($, $(verseEl)))
+        .join(' ')
     })()
 
     return replaceQuotationMarks(verseText)
@@ -155,10 +157,15 @@ async function getChapterVerses(url, chapter) {
  */
 async function getTestamentVerses(testamentUrlData) {
   const bookPromises = testamentUrlData.map(({bookName, chapterUrls}) => {
-    const chapterPromises = chapterUrls.map((url, i) => {
-      const chapter = i + 1
+    const chapterPromises = chapterUrls.map((url, chapterIdx) => {
+      const chapter = chapterIdx + 1
       const chapterPromise = getChapterVerses(url, chapter).then(verses => {
-        return {title: `${bookName} ${chapter}`, verses}
+        return {
+          title: `${bookName} ${chapter}`,
+          verses: verses.map((text, verseIdx) => {
+            return {verse: verseIdx + 1, text}
+          }),
+        }
       })
 
       return chapterPromise
@@ -186,4 +193,19 @@ function writeVersesData(data) {
  */
 function replaceQuotationMarks(str) {
   return str.replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
+}
+
+/**
+ * @param {cheerio.CheerioAPI} $
+ * @param {cheerio.Cheerio<cheerio.Element>} $el
+ */
+function checkSmallCapsAndGetText($, $el) {
+  $el.children().each((i, child) => {
+    const $child = $(child)
+    if ($child.hasClass('small-caps')) {
+      $child.text($child.text().toUpperCase())
+    }
+  })
+
+  return $el.text().trim()
 }
