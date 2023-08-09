@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import {Client} from '@notionhq/client'
 import {VersesDataSchema} from './schemas.js'
-import {readJsonSync, writeJsonSync} from 'fs-extra/esm'
+import {readJsonSync} from 'fs-extra/esm'
 
 /**
  * ❓❓❓ Where can I find my database ID?
@@ -26,7 +26,6 @@ import {readJsonSync, writeJsonSync} from 'fs-extra/esm'
  */
 
 const notion = new Client({auth: process.env.NOTION_TOKEN})
-const WAIT_TIME = 1100
 const GROUPED_BLOCK_SIZE = 1000
 const GROUP_RICH_TEXT_SIZE = 100
 const esvBible = VersesDataSchema.parse(
@@ -44,12 +43,21 @@ const notionColors = [
   'red',
 ]
 
-// Genesis, Leviticus
-;[esvBible.ot[0], esvBible.ot[1]].reduce((acc, book, i) => {
-  const bookColor = notionColors[(i + 1) % notionColors.length]
+;[esvBible.ot, esvBible.nt].reduce((acc, testament, testamentIdx) => {
+  const testamentPromiseFxn = () => {
+    return testament.reduce((acc, book) => {
+      const bookIdx = testament.findIndex(
+        item => item.bookName === book.bookName
+      )
 
-  console.log(book.bookName, bookColor)
-  return acc.then(() => processBook(book, i + 1, 'OT'))
+      return acc.then(() => {
+        console.log(`PROCESSING ${book.bookName}...`)
+        return processBook(book, bookIdx + 1, testamentIdx ? 'NT' : 'OT')
+      })
+    }, Promise.resolve())
+  }
+
+  return acc.then(testamentPromiseFxn)
 }, Promise.resolve())
 
 function processBook(book, bookIdx, testament) {
@@ -82,6 +90,10 @@ function processBook(book, bookIdx, testament) {
       GROUP_RICH_TEXT_SIZE
     )
 
+    /**
+     * Create blocks for every verse in the chapter. Each verse will be it's own
+     * block.
+     */
     const totalBlocks = groupedRichTextObjects.map(richTextObjects => {
       return {
         object: 'block',
@@ -90,8 +102,16 @@ function processBook(book, bookIdx, testament) {
       }
     })
 
+    /**
+     * Notion limits the total number of blocks in a single request to 1000.
+     */
     const groupedBlocks = splitArrayIntoChunks(totalBlocks, GROUPED_BLOCK_SIZE)
 
+    /**
+     * Add chunks of blocks to the accumulator. Each chunk represents a single
+     * request to the Notion API. By this point, we've stayed within the limits
+     * for a single request and maxed it out.
+     */
     groupedBlocks.forEach(children => {
       acc.push({
         parent: {database_id: process.env.ESV_ID},
@@ -135,47 +155,49 @@ function processBook(book, bookIdx, testament) {
     return acc
   }, [])
 
-  const requestsChunks = splitArrayIntoChunks(requestsData, 3)
-  const promisesToExecute = requestsChunks.reduce(
-    (acc, chunkOfRequests, chunkIdx) => {
-      const notionPromises = chunkOfRequests.map(data =>
-        notion.pages.create(data)
-      )
-      const notionPromise = Promise.allSettled(notionPromises).then(results => {
-        let hasFailure = false
+  /**
+   * Notion limits the amount of requests to 3 per second. We will look to fire
+   * 3 requests at a time per internal, which will be just over a second to stay
+   * within the limits.
+   */
+  const requestsDataChunks = splitArrayIntoChunks(requestsData, 3)
 
-        console.log('CHUNK', chunkIdx)
-
-        results.forEach(({status, value, reason}, resultIdx) => {
-          if (status === 'rejected') hasFailure = true
-
-          const title =
-            chunkOfRequests[resultIdx].properties.Name.title[0].text.content
-          console.log(status, title)
-
-          if (hasFailure) {
-            console.log('FAILURE REASON:', reason)
-            // console.log(
-            //   'FAILED REQUEST DATA:',
-            //   JSON.stringify(chunkOfRequests[resultIdx], null, 2)
-            // )
-          }
+  /**
+   * Wrap each chunk of requests in a function which returns a promise so that
+   * we can throttle the amount of requests being made. When promises are
+   * created they are immediately executed, so by wrapping them in functions we
+   * can control the flow.
+   */
+  const requestPromiseFxns = requestsDataChunks.map(chunkOfRequestsData => {
+    return () => {
+      const chunkOfRequests = chunkOfRequestsData.map(data =>
+        notion.pages.create(data).catch(e => {
+          const pageTitle = data.properties.Name.title[0].text.content
+          console.log('FAILED REQUEST:', pageTitle, e)
+          process.exit()
         })
+      )
 
-        console.log('-'.repeat(100))
-        if (hasFailure) process.exit()
-      })
-      const iterationPromise = Promise.all([notionPromise, wait(WAIT_TIME)])
+      /**
+       * Return a promise that resolves after 2 conditions:
+       * 1. The 3 requests are complete
+       * 2. A specified amount of time has passed
+       */
 
-      return acc.then(() => iterationPromise)
-    },
+      return Promise.all([chunkOfRequests, wait(getWaitTime())])
+    }
+  })
+
+  const promiseChain = requestPromiseFxns.reduce(
+    (acc, fxn, idx, arr) =>
+      acc
+        .then(fxn)
+        .then(() => console.log(`${idx + 1} of ${arr.length} completed`)),
     Promise.resolve()
   )
 
-  return promisesToExecute
+  return promiseChain
 }
-
-// writeJsonSync('./temp-requests.json', requests, {spaces: 2})
 
 /**
  * @param {any[]} arr
@@ -193,4 +215,12 @@ function wait(ms) {
   return new Promise(resolve => {
     setTimeout(resolve, ms)
   })
+}
+
+function getWaitTime() {
+  return getRandomNumber(1100, 1300)
+}
+
+function getRandomNumber(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }
