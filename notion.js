@@ -28,6 +28,8 @@ import {readJsonSync} from 'fs-extra/esm'
 const notion = new Client({auth: process.env.NOTION_TOKEN})
 const GROUPED_BLOCK_SIZE = 1000
 const GROUP_RICH_TEXT_SIZE = 100
+const MAX_RETRY_COUNT = 10
+const RETRY_WAIT_TIME = 2000
 const esvBible = VersesDataSchema.parse(
   readJsonSync('./data/esv/versesData.json')
 )
@@ -170,13 +172,34 @@ function processBook(book, bookIdx, testament) {
    */
   const requestPromiseFxns = requestsDataChunks.map(chunkOfRequestsData => {
     return () => {
-      const chunkOfRequests = chunkOfRequestsData.map(data =>
-        notion.pages.create(data).catch(e => {
-          const pageTitle = data.properties.Name.title[0].text.content
-          console.log('FAILED REQUEST:', pageTitle, e)
-          process.exit()
-        })
-      )
+      const chunkOfRequests = chunkOfRequestsData.map(data => {
+        let retryCount = 0
+
+        /**
+         * The Notion API can fail sporadically at times. This retry function
+         * will both retry a number of times as well as insert a pause half way
+         * through the retries just to "reset" any throttling the API might do.
+         */
+        function keepTrying() {
+          return notion.pages.create(data).catch(e => {
+            retryCount++
+
+            if (retryCount === MAX_RETRY_COUNT) {
+              const pageTitle = data.properties.Name.title[0].text.content
+              console.log('FAILED REQUEST:', pageTitle, e)
+              process.exit()
+            } else if (Math.ceil(retryCount / 2)) {
+              console.log(`retrying ${retryCount} and waiting a bit...`)
+              return wait(RETRY_WAIT_TIME).then(keepTrying)
+            } else {
+              console.log(`retrying ${retryCount}...`)
+              return keepTrying()
+            }
+          })
+        }
+
+        return keepTrying()
+      })
 
       /**
        * Return a promise that resolves after 2 conditions:
