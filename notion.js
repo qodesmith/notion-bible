@@ -33,6 +33,9 @@ const RETRY_WAIT_TIME = 2000
 const esvBible = VersesDataSchema.parse(
   readJsonSync('./data/esv/versesData.json')
 )
+const nasbBible = VersesDataSchema.parse(
+  readJsonSync('./data/nasb/versesData.json')
+)
 const notionColors = [
   'gray',
   'brown',
@@ -45,24 +48,40 @@ const notionColors = [
   'red',
 ]
 
-;[esvBible.ot, esvBible.nt].reduce((acc, testament, testamentIdx) => {
-  const testamentPromiseFxn = () => {
-    return testament.reduce((acc, book) => {
-      const bookIdx = testament.findIndex(
-        item => item.bookName === book.bookName
-      )
+// Kick off the process.
+processBible(esvBible, process.env.ESV_ID)
+// processBible(nasb, process.env.ESV_ID)
 
-      return acc.then(() => {
-        console.log(`PROCESSING ${book.bookName}...`)
-        return processBook(book, bookIdx + 1, testamentIdx ? 'NT' : 'OT')
-      })
-    }, Promise.resolve())
-  }
+function processBible(bible, databaseId) {
+  const biblePromise = [bible.ot, bible.nt].reduce(
+    (acc, testament, testamentIdx) => {
+      const testamentPromiseFxn = () => {
+        return testament.reduce((acc, book) => {
+          const bookIdx =
+            testament.findIndex(item => item.bookName === book.bookName) +
+            (testamentIdx ? bible.ot.length : 0)
 
-  return acc.then(testamentPromiseFxn)
-}, Promise.resolve())
+          return acc.then(() => {
+            console.log(`PROCESSING ${book.bookName}...`)
+            return processBook(
+              book,
+              bookIdx + 1,
+              testamentIdx ? 'NT' : 'OT',
+              databaseId
+            )
+          })
+        }, Promise.resolve())
+      }
 
-function processBook(book, bookIdx, testament) {
+      return acc.then(testamentPromiseFxn)
+    },
+    Promise.resolve()
+  )
+
+  return biblePromise
+}
+
+function processBook(book, bookIdx, testament, databaseId) {
   const {bookName, chapters} = book
 
   const requestsData = chapters.reduce((acc, {title, verses}, idx) => {
@@ -70,18 +89,26 @@ function processBook(book, bookIdx, testament) {
      * This is an array of all the verses in a single chapter. The format is a
      * bold verse number and a space between the verse text.
      */
-    const totalRichTextObjects = verses.reduce((acc, {verse, text}) => {
-      // The bold verse number.
-      acc.push({
-        type: 'text',
-        text: {content: `${verse} `},
-        annotations: {bold: true},
-      })
+    const totalRichTextObjects = verses.reduce(
+      (acc, {verse, text}, verseIdx) => {
+        const isLastVerse = verseIdx === verses.length - 1
 
-      // The verse text.
-      acc.push({type: 'text', text: {content: text}})
-      return acc
-    }, [])
+        // The bold verse number.
+        acc.push({
+          type: 'text',
+          text: {content: `${verse} `},
+          annotations: {bold: true},
+        })
+
+        // The verse text.
+        acc.push({
+          type: 'text',
+          text: {content: isLastVerse ? text : `${text} `},
+        })
+        return acc
+      },
+      []
+    )
 
     /**
      * Notion limits the amount of rich text objects to 100, so we have to group
@@ -116,7 +143,7 @@ function processBook(book, bookIdx, testament) {
      */
     groupedBlocks.forEach(children => {
       acc.push({
-        parent: {database_id: process.env.ESV_ID},
+        parent: {database_id: databaseId},
         properties: {
           Name: {
             type: 'title',
