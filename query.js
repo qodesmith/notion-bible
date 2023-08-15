@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import {Client} from '@notionhq/client'
 
 // GITHUB ISSUE - https://github.com/makenotion/notion-sdk-js/issues/436
